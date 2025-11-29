@@ -394,3 +394,4 @@ FodyWeavers.xsd
 *.sln.iml
 .idea/
 /doc/docs/.vuepress/.temp
+/doc/docs/.vuepress/dist
