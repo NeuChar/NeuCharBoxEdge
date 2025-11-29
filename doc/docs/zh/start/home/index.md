@@ -25,3 +25,19 @@ NeuCharBox(NCB) 是一款创新的物理世界操作系统，是一款以 “设
 **NeuCharBox**：类似模型“预训练”和“后训练”过程，采用“预编程”和“后编程”机制，在运行过程中摆脱对 AI 算力依赖，成百倍地提系统升运行速度，同时基于盛派历经十余年研发的 NeuCharFramework 系统，提供了一整套多智能体工程化解决方案，动态控制成功率已接近 100%。
 
 <img width="922" height="465" alt="image" src="https://github.com/user-attachments/assets/b2e79f99-db34-4b83-a51e-f9c34e31555b" />
+
+## 配置文件
+
+<img src="./images/ncb-0001.png" />
+
+## 关键配置信息
+
+<img src="./images/ncb-0002.png" />
+
+## NeuCharBox QQ交流群
+
+<img src="./images/ncb-0098.png" />
+
+## NeuCharBox 开发者交流群
+
+<img src="./images/ncb-0099.png" />
