@@ -49,7 +49,7 @@ export default defineUserConfig({
 
   // configure default theme
   theme: defaultTheme({
-    hostname: 'https://doc.ncf.pub',
+    hostname: 'https://www.neuchar.com/docs',
     logo: '/images/logo.png',
     logoDark: '/images/logo.png',
     repo: 'NeuChar/NeuCharBoxEdge',

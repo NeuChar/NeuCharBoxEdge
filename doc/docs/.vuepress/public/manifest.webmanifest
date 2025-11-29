@@ -1,6 +1,6 @@
 {
-  "name": "NeuCharFramework",
-  "short_name": "NCF",
+  "name": "NeuCharBox",
+  "short_name": "NCB",
   "description": "An AI-enabled, out-of-the-box modular development framework",
   "start_url": "/index.html",
   "display": "standalone",
