@@ -274,7 +274,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 }
                 
                 // 设置蓝牙名称
-                await ExecuteCommandAsync($"sudo bluetoothctl system-alias {_bluetoothName}");
+                await ExecuteCommandAsync($"sudo bluetoothctl system-alias '{_bluetoothName}'");
                 await ExecuteCommandAsync($"sudo hciconfig hci0 name '{_bluetoothName}'");
                 await ExecuteCommandAsync($"sudo btmgmt -i hci0 name \"{_bluetoothName}\"");
 

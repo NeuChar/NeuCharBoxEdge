@@ -393,3 +393,5 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 .idea/
+/doc/docs/.vuepress/.temp
+/doc/docs/.vuepress/dist
