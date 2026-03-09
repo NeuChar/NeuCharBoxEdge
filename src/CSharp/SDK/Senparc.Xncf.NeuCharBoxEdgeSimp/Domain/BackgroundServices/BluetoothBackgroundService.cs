@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Models;
+using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -119,6 +120,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
     {
         private readonly ILogger<BluetoothBackgroundService> _logger;
         private readonly SenderReceiverSet _senderReceiverSet;
+        private readonly WifiManagerService _wifiManagerService;
         
         // 连接的客户端管理
         private readonly ConcurrentDictionary<string, BluetoothClientConnection> _connectedClients;
@@ -141,10 +143,12 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
 
         public BluetoothBackgroundService(
             ILogger<BluetoothBackgroundService> logger,
-            SenderReceiverSet senderReceiverSet)
+            SenderReceiverSet senderReceiverSet,
+            WifiManagerService wifiManagerService)
         {
             _logger = logger;
             _senderReceiverSet = senderReceiverSet;
+            _wifiManagerService = wifiManagerService;
             _connectedClients = new ConcurrentDictionary<string, BluetoothClientConnection>();
             _deviceName = _senderReceiverSet.deciveName ?? "NeuChar-EdgeDevice";
             
@@ -223,7 +227,38 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                     while (!stoppingToken.IsCancellationRequested)
                     {
                         await RemoveNoConnectDevicesAsync();
-                        await Task.Delay(10000);
+                        await Task.Delay(300000);
+                    }
+                });
+                
+                // 🔴 新增：定期检查蓝牙可发现性（防止外部因素修改状态）
+                Task.Run(async () => {
+                    while (!stoppingToken.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            await Task.Delay(60000, stoppingToken); // 每60秒检查一次
+                            
+                            var checkResult = await ExecuteCommandAsync("bluetoothctl show | grep 'Discoverable: yes'");
+                            if (!checkResult.Success || string.IsNullOrEmpty(checkResult.Output))
+                            {
+                                _logger.LogWarning("⚠️ 检测到蓝牙不可发现，正在自动恢复...");
+                                
+                                await ExecuteCommandAsync("sudo rfkill unblock bluetooth");
+                                await Task.Delay(300);
+                                await ExecuteCommandAsync("echo 'power on' | bluetoothctl");
+                                await Task.Delay(300);
+                                await ExecuteCommandAsync("echo 'discoverable on' | bluetoothctl");
+                                await Task.Delay(300);
+                                await ExecuteCommandAsync("echo 'pairable on' | bluetoothctl");
+                                
+                                _logger.LogInformation("✅ 蓝牙可发现性已自动恢复");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "检查蓝牙可发现性时发生错误");
+                        }
                     }
                 });
                 
@@ -276,19 +311,57 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 // 设置蓝牙名称
                 await ExecuteCommandAsync($"sudo bluetoothctl system-alias '{_bluetoothName}'");
                 await ExecuteCommandAsync($"sudo hciconfig hci0 name '{_bluetoothName}'");
-                await ExecuteCommandAsync($"sudo btmgmt -i hci0 name \"{_bluetoothName}\"");
+                //await ExecuteCommandAsync($"sudo btmgmt -i hci0 name \"{_bluetoothName}\"");
 
                 //关闭广告（防止修改时冲突）
-                await ExecuteCommandAsync($"sudo btmgmt advertising off");
+                //await ExecuteCommandAsync($"sudo btmgmt advertising off");
                 //添加高频广播（interval min=20ms, max=20ms）
                 //await ExecuteCommandAsync($"sudo btmgmt add-adv -i0x0020 -g0x0020 -t0 -c0x02");
                 //await ExecuteCommandAsync($"sudo btmgmt add-adv -i0x0020 -g0x0020 -t0 -c0x07"); //20ms
-                await ExecuteCommandAsync($"sudo btmgmt add-adv -i0x0050 -g0x0050 -t0 -c0x07"); //50ms
+                //await ExecuteCommandAsync($"sudo btmgmt add-adv -i0x0050 -g0x0050 -t0 -c0x07"); //50ms
                 //await ExecuteCommandAsync($"sudo btmgmt add-adv -i0x00A0 -g0x00A0 -t0 -c0x07"); //100ms
 
 
-                //启动广告
-                await ExecuteCommandAsync($"sudo btmgmt advertising on");
+                // 🔴 启用 BLE 广播（异步后台任务，不阻塞主流程）
+                _logger.LogInformation("启动 BLE 广播后台任务...");
+                
+                _ = Task.Run(async () => {
+                    try
+                    {
+                        // 等待蓝牙完全初始化
+                        _logger.LogInformation("BLE 广播后台任务：等待蓝牙初始化...");
+                        await Task.Delay(5000);
+                        
+                        _logger.LogInformation("BLE 广播后台任务：执行广播命令...");
+                        
+                        // 使用超时机制执行广播命令
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                        var advTask = ExecuteCommandAsync($"sudo btmgmt advertising on");
+                        
+                        if (await Task.WhenAny(advTask, Task.Delay(15000, cts.Token)) == advTask)
+                        {
+                            var advResult = await advTask;
+                            if (advResult.Success)
+                            {
+                                _logger.LogInformation($"✅ BLE 广播启用成功: {advResult.Output}");
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"⚠️ BLE 广播启用失败: {advResult.Error}");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ BLE 广播命令超时（15秒），跳过此步骤");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "BLE 广播后台任务失败（不影响RFCOMM功能）");
+                    }
+                });
+                
+                _logger.LogInformation("BLE 广播后台任务已启动（异步执行，不阻塞主流程）");
                 
                 _logger.LogInformation($"蓝牙适配器初始化完成:");
                 _logger.LogInformation($"  设备名称: {_deviceName}");
@@ -314,9 +387,9 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
             {
                 _logger.LogInformation("正在配置蓝牙SDP服务...");
                 
-                // 创建SDP服务记录文件
+                // 创建SDP服务记录文件（使用带时间戳的文件名，避免权限冲突）
                 var sdpRecord = CreateSdpServiceRecord();
-                var sdpFilePath = "/tmp/neuchar_sdp_record.xml";
+                var sdpFilePath = $"/tmp/neuchar_sdp_record_{DateTime.Now.Ticks}.xml";
                 await File.WriteAllTextAsync(sdpFilePath, sdpRecord);
                 
                 // 注册SDP服务 - 使用更兼容的方式
@@ -352,10 +425,18 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 await SetupPairingModeAsync();
                 
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogError(ex, $"配置蓝牙服务失败（权限问题）: {ex.Message}");
+                _logger.LogWarning("SDP 服务配置失败，但 RFCOMM 监听仍会继续启动");
+                _logger.LogInformation("提示：可能是临时文件权限问题，请执行: sudo rm -f /tmp/neuchar_sdp_record*.xml");
+                // 权限问题不应导致整个服务崩溃，继续运行
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "配置蓝牙服务失败");
-                throw;
+                _logger.LogError(ex, $"配置蓝牙服务失败: {ex.Message}");
+                _logger.LogWarning("SDP 服务配置失败，但 RFCOMM 监听仍会继续启动");
+                // 其他异常也不应导致整个服务崩溃，客户端可以通过指定通道号连接
             }
         }
 
@@ -374,16 +455,16 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 {
                     _logger.LogInformation($"bluetoothctl路径: {bluetoothctlCheck.Output}");
 
-                    //重启蓝牙
-                    await ExecuteCommandAsync("sudo systemctl restart bluetooth");
-                    await Task.Delay(1000);
+                    //🔴 注释掉：初始化时重启蓝牙会导致可发现性丢失
+                    // await ExecuteCommandAsync("sudo systemctl restart bluetooth");
+                    // await Task.Delay(1000);
 
                     // 再次设置蓝牙名称
                     await ExecuteCommandAsync($"sudo bluetoothctl system-alias {_bluetoothName}");
                     await Task.Delay(1000);
 
                     // 启动持续的蓝牙代理进程，保持agent活跃
-                    await StartBluetoothAgentAsync();
+                    //await StartBluetoothAgentAsync();
 
                     //移除所有蓝牙设备
                     await RemoveAllDevicesAsync();
@@ -611,7 +692,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                         }
                         
                         // 移除断开的蓝牙设备记录
-                    await RemoveAllDevicesAsync();
+                    //await RemoveAllDevicesAsync();
 
                         await Task.Delay(1000); // 短暂等待后继续监听
                 }
@@ -669,7 +750,6 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 var discoveredAddresses = new HashSet<string>();
                 
                 DateTime now=DateTime.Now;
-
                 foreach (var line in lines)
                 {
                     // 解析格式: Device AA:BB:CC:DD:EE:FF Device Name
@@ -681,6 +761,12 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
 
                         await ExecuteCommandAsync($"echo 'remove {deviceAddress}' | bluetoothctl");
                         _logger.LogInformation($"移除蓝牙设备: {deviceAddress}，{deviceName}");
+
+                        await ExecuteCommandAsync($"sudo rm -rf /var/lib/bluetooth/{_bluetoothAddress}/{deviceAddress}");
+                        _logger.LogInformation($"移除蓝牙设备文件: {deviceAddress}");
+
+                        await ExecuteCommandAsync($"sudo rm -rf /var/lib/bluetooth/{_bluetoothAddress}/cache/*");
+                        _logger.LogInformation($"移除蓝牙设备缓存: {deviceAddress}");
                     }
                 }
             }
@@ -928,7 +1014,26 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 await ExecuteCommandAsync("sudo hciconfig hci0 piscan");
                 await ExecuteCommandAsync($"sudo hciconfig hci0 name '{_bluetoothName}'");
                 
-                _logger.LogInformation("强制清理完成");
+                // 🔴 7. 恢复可发现性（关键！防止重启后不可被发现）
+                _logger.LogInformation("恢复蓝牙可发现性...");
+                await ExecuteCommandAsync("sudo rfkill unblock bluetooth");
+                await Task.Delay(500);
+                
+                // 使用 bluetoothctl 恢复状态
+                await ExecuteCommandAsync("echo 'power on' | bluetoothctl");
+                await Task.Delay(300);
+                await ExecuteCommandAsync("echo 'discoverable-timeout 0' | bluetoothctl");
+                await Task.Delay(300);
+                await ExecuteCommandAsync("echo 'discoverable on' | bluetoothctl");
+                await Task.Delay(300);
+                await ExecuteCommandAsync("echo 'pairable on' | bluetoothctl");
+                await Task.Delay(300);
+                
+                // 验证状态
+                var verifyResult = await ExecuteCommandAsync("bluetoothctl show | grep -E 'Powered|Discoverable'");
+                _logger.LogInformation($"蓝牙状态验证: {verifyResult.Output}");
+                
+                _logger.LogInformation("强制清理完成，已恢复蓝牙可发现性");
             }
             catch (Exception ex)
             {
@@ -1233,271 +1338,29 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                            Console.WriteLine($"蓝牙消息解密后数据: {jsonMsg}");
                            var wifiConfigMsg=JsonConvert.DeserializeObject<WifiConfigMsg>(jsonMsg);
 
-                            // 验证 NCBIP 格式和连通性
+                            // 验证参数
+                            if (string.IsNullOrWhiteSpace(wifiConfigMsg.SSID))
+                            {
+                                _logger.LogWarning("WiFi SSID为空，跳过WiFi连接");
+                                throw new NcfExceptionBase("WiFi SSID为空");
+                            }
+
                             if (string.IsNullOrWhiteSpace(wifiConfigMsg.NCBIP))
                             {
                                 throw new NcfExceptionBase("NCBIP Is Empty");
                             }
 
-                            // 验证 IP 地址格式
-                            if (!System.Net.IPAddress.TryParse(wifiConfigMsg.NCBIP, out var ipAddress))
-                            {
-                                throw new NcfExceptionBase($"NCBIP Format Error: {wifiConfigMsg.NCBIP}");
-                            }
-
-                            // 连接WiFi网络
-                            if (!string.IsNullOrWhiteSpace(wifiConfigMsg.SSID))
-                            {
-                                _logger.LogInformation($"开始连接WiFi网络: {wifiConfigMsg.SSID}");
-                                
-                                try
-                                {
-                                    // 使用WiFi后台服务检查网络可用性
-                                    if (!WifiBackgroundService.IsWifiEnabled)
-                                    {
-                                        throw new NcfExceptionBase("WiFi功能未启用或未初始化");
-                                    }
-
-                                    // 检查目标SSID是否在扫描结果中
-                                    if (!WifiBackgroundService.IsNetworkAvailable(wifiConfigMsg.SSID))
-                                    {
-                                        _logger.LogWarning($"WiFi网络 '{wifiConfigMsg.SSID}' 未在扫描结果中找到");
-                                        
-                                        // 显示可用网络列表供调试
-                                        var availableNetworks = WifiBackgroundService.GetAllAvailableNetworks();
-                                        if (availableNetworks.Any())
-                                        {
-                                            _logger.LogInformation($"当前可用的WiFi网络 ({availableNetworks.Count}个):");
-                                            foreach (var network in availableNetworks.Take(10))
-                                            {
-                                                _logger.LogInformation($"  SSID: {network.SSID}, 信号: {network.Signal}dBm, 安全: {network.Security}");
-                                            }
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning("未扫描到任何WiFi网络");
-                                        }
-                                        
-                                        throw new NcfExceptionBase($"未找到WiFi网络 '{wifiConfigMsg.SSID}'，请检查SSID是否正确或网络是否在范围内");
-                                    }
-                                    
-                                    // 获取网络信息
-                                    var networkInfo = WifiBackgroundService.GetNetworkInfo(wifiConfigMsg.SSID);
-                                    _logger.LogInformation($"找到目标WiFi网络: {networkInfo.SSID}, 信号强度: {networkInfo.Signal}dBm, 安全类型: {networkInfo.Security}");
-
-                                    // 删除可能存在的同名连接配置
-                                    await ExecuteCommandAsync($"sudo nmcli connection delete '{wifiConfigMsg.SSID}' 2>/dev/null || true");
-
-                                    // 创建新的WiFi连接（使用connection add方式，支持自动重连）
-                                    string addConnectionCommand;
-                                    if (!string.IsNullOrWhiteSpace(wifiConfigMsg.Password))
-                                    {
-                                        // 有密码的WiFi网络
-                                        addConnectionCommand = $"sudo nmcli connection add type wifi con-name '{wifiConfigMsg.SSID}' ifname {WifiBackgroundService.WifiInterfaceName} ssid '{wifiConfigMsg.SSID}' wifi-sec.key-mgmt wpa-psk wifi-sec.psk '{wifiConfigMsg.Password}' connection.autoconnect yes";
-                                    }
-                                    else
-                                    {
-                                        // 开放WiFi网络
-                                        addConnectionCommand = $"sudo nmcli connection add type wifi con-name '{wifiConfigMsg.SSID}' ifname {WifiBackgroundService.WifiInterfaceName} ssid '{wifiConfigMsg.SSID}' connection.autoconnect yes";
-                                    }
-
-                                    _logger.LogInformation("创建WiFi连接配置...");
-                                    var addResult = await ExecuteCommandAsync(addConnectionCommand);
-                                    if (!addResult.Success)
-                                    {
-                                        _logger.LogWarning($"创建连接配置失败，尝试直接连接: {addResult.Error}");
-                                        
-                                        // 备用方案：直接连接
-                                        string directConnectCommand;
-                                        if (!string.IsNullOrWhiteSpace(wifiConfigMsg.Password))
-                                        {
-                                            directConnectCommand = $"sudo nmcli device wifi connect '{wifiConfigMsg.SSID}' password '{wifiConfigMsg.Password}'";
-                                        }
-                                        else
-                                        {
-                                            directConnectCommand = $"sudo nmcli device wifi connect '{wifiConfigMsg.SSID}'";
-                                        }
-                                        
-                                        var connectResult = await ExecuteCommandAsync(directConnectCommand);
-                                        if (!connectResult.Success)
-                                        {
-                                            throw new NcfExceptionBase($"WiFi连接失败: {connectResult.Error}");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        _logger.LogInformation("WiFi连接配置创建成功，正在连接...");
-                                        
-                                        // 激活连接
-                                        var upResult = await ExecuteCommandAsync($"sudo nmcli connection up '{wifiConfigMsg.SSID}'");
-                                        if (!upResult.Success)
-                                        {
-                                            throw new NcfExceptionBase($"WiFi连接激活失败: {upResult.Error}");
-                                        }
-                                    }
-
-                                    // 等待连接建立
-                                    await Task.Delay(3000);
-
-                                    // 验证连接状态
-                                    var statusResult = await ExecuteCommandAsync("nmcli -t -f WIFI g");
-                                    if (statusResult.Success && statusResult.Output.Trim().Equals("enabled", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        // 获取连接的WiFi信息
-                                        var wifiInfoResult = await ExecuteCommandAsync("nmcli -t -f active,ssid dev wifi | egrep '^yes' | cut -d: -f2");
-                                        if (wifiInfoResult.Success )
-                                        {
-                                            if (string.IsNullOrEmpty(wifiInfoResult.Output.Trim()))
-                                            {
-                                                _logger.LogInformation($"WiF连接验证，命令1输出空，使用命令2");
-                                                var wifiInfoResult2 = await ExecuteCommandAsync("iwgetid -r");
-                                                if (wifiInfoResult2.Success && wifiInfoResult2.Output.Trim().Equals(wifiConfigMsg.SSID, StringComparison.OrdinalIgnoreCase))
-                                                {
-
-                                                }
-                                                else {
-                                                    throw new NcfExceptionBase($"WiFi连接验证失败，当前连接的网络不是 {wifiConfigMsg.SSID}");
-                                                }
-                                            }
-                                            else{
-                                                if (wifiInfoResult.Output.Trim().Equals(wifiConfigMsg.SSID, StringComparison.OrdinalIgnoreCase))
-                                                {
-
-                                                }
-                                                else {
-                                                    throw new NcfExceptionBase($"WiFi连接验证失败，当前连接的网络不是 {wifiConfigMsg.SSID}");
-                                                }
-                                            }
-                                            _logger.LogInformation($"WiFi连接成功: {wifiConfigMsg.SSID}");
-                                        }
-                                        else
-                                        {
-                                            throw new NcfExceptionBase($"WiFi连接验证失败，当前连接的网络不是 {wifiConfigMsg.SSID}");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        throw new NcfExceptionBase("WiFi连接验证失败，WiFi未启用");
-                                    }
-                                }
-                                catch (NcfExceptionBase)
-                                {
-                                    throw;
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, $"连接WiFi网络时发生异常: {wifiConfigMsg.SSID}");
-                                    throw new NcfExceptionBase($"连接WiFi网络失败: {ex.Message}");
-                                }
-                            }
-                            else
-                            {
-                                _logger.LogWarning("WiFi SSID为空，跳过WiFi连接");
-                                throw new NcfExceptionBase("WiFi SSID为空");
-                            }
+                            _logger.LogInformation($"[蓝牙配网] 收到WiFi配网请求: SSID={wifiConfigMsg.SSID}, NCBIP={wifiConfigMsg.NCBIP}");
                             
-
-                            // 尝试 ping NCBIP 地址测试连通性（带重试机制）
-                            bool pingSuccess = false;
-                            int maxRetries = 10;
-                            int retryDelay = 1000; // 1秒
-                            Exception lastPingException = null;
+                            // 🔴 使用统一的 WifiManagerService 连接 WiFi
+                            var (connectSuccess, connectMessage) = await _wifiManagerService.ConnectToWifiAsync(
+                                wifiConfigMsg.SSID, 
+                                wifiConfigMsg.Password, 
+                                wifiConfigMsg.NCBIP);
                             
-                            using (var ping = new System.Net.NetworkInformation.Ping())
+                            if (!connectSuccess)
                             {
-                                for (int attempt = 1; attempt <= maxRetries; attempt++)
-                                {
-                                    try
-                                    {
-                                        _logger.LogInformation($"第{attempt}次尝试ping NCBIP地址: {wifiConfigMsg.NCBIP}");
-                                        
-                                        var reply = await ping.SendPingAsync(ipAddress, 2000); // 2秒超时
-                                        if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
-                                        {
-                                            _logger.LogInformation($"NCBIP地址 {wifiConfigMsg.NCBIP} 连通性验证成功，响应时间: {reply.RoundtripTime}ms (第{attempt}次尝试)");
-                                            pingSuccess = true;
-                                            break;
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning($"第{attempt}次ping失败: {wifiConfigMsg.NCBIP}, 状态: {reply.Status}");
-                                            lastPingException = new Exception($"Ping状态: {reply.Status}");
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning($"第{attempt}次ping异常: {wifiConfigMsg.NCBIP}, 错误: {ex.Message}");
-                                        lastPingException = ex;
-                                    }
-                                    
-                                    // 如果不是最后一次尝试，等待后重试
-                                    if (attempt < maxRetries)
-                                    {
-                                        _logger.LogInformation($"等待{retryDelay}ms后重试...");
-                                        await Task.Delay(retryDelay);
-                                    }
-                                }
-                            }
-                            
-                            // 检查最终结果
-                            if (!pingSuccess)
-                            {
-                                var errorMessage = lastPingException != null 
-                                    ? $"Ping NCBIP address {wifiConfigMsg.NCBIP} failed after {maxRetries} attempts: {lastPingException.Message}"
-                                    : $"Cannot connect to NCBIP address {wifiConfigMsg.NCBIP} after {maxRetries} attempts";
-                                    
-                                _logger.LogError(errorMessage);
-                                throw new NcfExceptionBase(errorMessage);
-                            }
-
-                            // 保存NCBIP到配置文件
-                            var appsettingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
-                            if (File.Exists(appsettingsPath))
-                            {
-                                var json = File.ReadAllText(appsettingsPath);
-                                var config = JsonConvert.DeserializeObject<dynamic>(json);
-                                
-                                // 确保SenderReceiverSet节点存在
-                                if (config.SenderReceiverSet == null)
-                                {
-                                    config.SenderReceiverSet = new Newtonsoft.Json.Linq.JObject();
-                                }
-                                
-                                // 更新NCBIP值
-                                config.SenderReceiverSet.NCBIP = wifiConfigMsg.NCBIP;
-                                
-                                // 写回配置文件
-                                var updatedJson = JsonConvert.SerializeObject(config, Formatting.Indented);
-                                File.WriteAllText(appsettingsPath, updatedJson);
-                                
-                                // 更新内存中的配置对象
-                                _senderReceiverSet.NCBIP = wifiConfigMsg.NCBIP;
-                                
-                                _logger.LogInformation($"[配网成功] 已将NCBIP {wifiConfigMsg.NCBIP} 保存到配置文件和内存");
-                                
-                                // 通知 Register.Thread 立即强制重连（不等待100ms循环）
-                                try
-                                {
-                                    // 通过反射设置强制重连信号
-                                    var registerType = typeof(Senparc.Xncf.NeuCharBoxEdgeSimp.Register);
-                                    var forceReconnectField = registerType.GetField("_forceReconnectSignal", 
-                                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                                    if (forceReconnectField != null)
-                                    {
-                                        forceReconnectField.SetValue(null, true);
-                                        _logger.LogInformation($"[配网成功] 已发送强制重连信号，SignalR将立即重新连接");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "[配网成功] 发送强制重连信号失败，将等待下次循环检测");
-                                }
-                                
-                                _logger.LogInformation($"[配网成功] SignalR连接线程将立即重新连接（无需等待）");
-                            }
-                            else
-                            {
-                                _logger.LogWarning("appsettings.json文件不存在，无法保存NCBIP配置");
+                                throw new NcfExceptionBase(connectMessage);
                             }
 
                             msgData="SUCCESS";

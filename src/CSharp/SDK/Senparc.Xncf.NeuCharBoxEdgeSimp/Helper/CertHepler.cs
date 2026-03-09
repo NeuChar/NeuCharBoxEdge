@@ -14,9 +14,9 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
         public const string HELLO_DEVICE = "HELLO NCB_EDGE_DEVICE";
         private const string DEFAULT_PRIVATE_KEY_SUFFIX = "_private_key.pem";
         private const string CERT_FOLDER_NAME = "Cert";
-        
+
         private static SenderReceiverSet _senderReceiverSet;
-        
+
         /// <summary>
         /// 设置SenderReceiverSet对象（用于获取DID）
         /// </summary>
@@ -25,7 +25,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
         {
             _senderReceiverSet = senderReceiverSet;
         }
-        
+
         /// <summary>
         /// 获取私钥文件名（基于DID构建：{DID}_private_key.pem）
         /// </summary>
@@ -47,7 +47,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
                 string appRootPath = AppDomain.CurrentDomain.BaseDirectory;
                 string certFolderPath = Path.Combine(appRootPath, CERT_FOLDER_NAME);
                 string privateKeyPath = Path.Combine(certFolderPath, GetPrivateKeyFileName());
-                
+
                 return File.Exists(privateKeyPath);
             }
             catch (Exception ex)
@@ -70,106 +70,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
         }
 
         /// <summary>
-        /// 从PEM文件中读取RSA私钥
-        /// </summary>
-        /// <returns>RSA私钥对象</returns>
-        private static RSA LoadPrivateKeyFromPem()
-        {
-            string privateKeyPath = GetPrivateKeyPath();
-            
-            if (!File.Exists(privateKeyPath))
-            {
-                throw new FileNotFoundException($"私钥文件不存在: {privateKeyPath}");
-            }
-
-            string pemContent = File.ReadAllText(privateKeyPath);
-            
-            // 移除PEM头尾和换行符，获取纯Base64内容
-            string base64Key = pemContent
-                .Replace("-----BEGIN PRIVATE KEY-----", "")
-                .Replace("-----END PRIVATE KEY-----", "")
-                .Replace("-----BEGIN RSA PRIVATE KEY-----", "")
-                .Replace("-----END RSA PRIVATE KEY-----", "")
-                .Replace("\r", "")
-                .Replace("\n", "")
-                .Trim();
-
-            byte[] keyBytes = Convert.FromBase64String(base64Key);
-            
-            RSA rsa = RSA.Create();
-            
-            try
-            {
-                // 尝试作为PKCS#8格式导入
-                rsa.ImportPkcs8PrivateKey(keyBytes, out _);
-            }
-            catch
-            {
-                try
-                {
-                    // 如果PKCS#8失败，尝试作为RSA私钥格式导入
-                    rsa.ImportRSAPrivateKey(keyBytes, out _);
-                }
-                catch (Exception ex)
-                {
-                    rsa.Dispose();
-                    throw new InvalidOperationException($"无法解析私钥文件: {ex.Message}");
-                }
-            }
-            
-            return rsa;
-        }
-
-        /// <summary>
-        /// 从PEM格式字符串中加载RSA公钥
-        /// </summary>
-        /// <param name="pemContent">PEM格式的公钥字符串</param>
-        /// <returns>RSA公钥对象</returns>
-        private static RSA LoadPublicKeyFromPemString(string pemContent)
-        {
-            if (string.IsNullOrEmpty(pemContent))
-            {
-                throw new ArgumentException("PEM公钥内容不能为空", nameof(pemContent));
-            }
-
-            // 移除PEM头尾和换行符，获取纯Base64内容
-            string base64Key = pemContent
-                .Replace("-----BEGIN PUBLIC KEY-----", "")
-                .Replace("-----END PUBLIC KEY-----", "")
-                .Replace("-----BEGIN RSA PUBLIC KEY-----", "")
-                .Replace("-----END RSA PUBLIC KEY-----", "")
-                .Replace("\r", "")
-                .Replace("\n", "")
-                .Trim();
-
-            byte[] keyBytes = Convert.FromBase64String(base64Key);
-            
-            RSA rsa = RSA.Create();
-            
-            try
-            {
-                // 尝试作为SPKI格式导入
-                rsa.ImportSubjectPublicKeyInfo(keyBytes, out _);
-            }
-            catch
-            {
-                try
-                {
-                    // 如果SPKI失败，尝试作为RSA公钥格式导入
-                    rsa.ImportRSAPublicKey(keyBytes, out _);
-                }
-                catch (Exception ex)
-                {
-                    rsa.Dispose();
-                    throw new InvalidOperationException($"无法解析公钥字符串: {ex.Message}");
-                }
-            }
-            
-            return rsa;
-        }
-
-        /// <summary>
-        /// 使用私钥对指定字符串进行RSA加密（签名操作）
+        /// 使用私钥对指定字符串进行RSA签名（签名操作）
         /// 注意：这不是真正的加密，而是数字签名的一种变体用法
         /// </summary>
         /// <param name="plainText">要"加密"的明文字符串</param>
@@ -183,20 +84,19 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
 
             try
             {
-                using (RSA rsa = LoadPrivateKeyFromPem())
+                string privateKeyPath = GetPrivateKeyPath();
+                if (!File.Exists(privateKeyPath))
                 {
-                    byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
-                    
-                    // 使用私钥进行签名（相当于私钥"加密"）
-                    // 使用SHA256哈希算法和PSS填充进行签名
-                    byte[] signatureBytes = rsa.SignData(plainBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
-                    
-                    return Convert.ToBase64String(signatureBytes);
+                    throw new FileNotFoundException($"私钥文件不存在: {privateKeyPath}");
                 }
+
+                string pemContent = File.ReadAllText(privateKeyPath);
+                // 调用 RSAEncryptionUtility 进行私钥签名
+                return Senparc.Utility.RSAEncryptionUtility.EncryptWithPrivateKey(plainText, pemContent);
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"RSA私钥加密失败: {ex.Message}", ex);
+                throw new InvalidOperationException($"RSA私钥签名失败: {ex.Message}", ex);
             }
         }
 
@@ -214,16 +114,15 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
 
             try
             {
-                using (RSA rsa = LoadPrivateKeyFromPem())
+                string privateKeyPath = GetPrivateKeyPath();
+                if (!File.Exists(privateKeyPath))
                 {
-                    byte[] encryptedBytes = Convert.FromBase64String(encryptedText);
-                    
-                    // 使用私钥进行解密（解密公钥加密的数据）
-                    // 使用OAEP SHA256填充进行解密
-                    byte[] decryptedBytes = rsa.Decrypt(encryptedBytes, RSAEncryptionPadding.OaepSHA256);
-                    
-                    return Encoding.UTF8.GetString(decryptedBytes);
+                    throw new FileNotFoundException($"私钥文件不存在: {privateKeyPath}");
                 }
+
+                string pemContent = File.ReadAllText(privateKeyPath);
+                // 调用 RSAEncryptionUtility 进行私钥解密
+                return Senparc.Utility.RSAEncryptionUtility.DecryptWithPrivateKey(encryptedText, pemContent);
             }
             catch (Exception ex)
             {
@@ -243,7 +142,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
             {
                 throw new ArgumentException("明文字符串不能为空", nameof(plainText));
             }
-            
+
             if (string.IsNullOrEmpty(publicKeyPem))
             {
                 throw new ArgumentException("公钥不能为空", nameof(publicKeyPem));
@@ -251,16 +150,8 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
 
             try
             {
-                using (RSA rsa = LoadPublicKeyFromPemString(publicKeyPem))
-                {
-                    byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
-                    
-                    // 使用公钥进行加密
-                    // 使用OAEP SHA256填充进行加密
-                    byte[] encryptedBytes = rsa.Encrypt(plainBytes, RSAEncryptionPadding.OaepSHA256);
-                    
-                    return Convert.ToBase64String(encryptedBytes);
-                }
+                // 调用 RSAEncryptionUtility 进行公钥加密
+                return Senparc.Utility.RSAEncryptionUtility.EncryptWithPublicKey(plainText, publicKeyPem);
             }
             catch (Exception ex)
             {
@@ -281,12 +172,12 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
             {
                 throw new ArgumentException("原始数据不能为空", nameof(originalData));
             }
-            
+
             if (string.IsNullOrEmpty(signature))
             {
                 throw new ArgumentException("签名字符串不能为空", nameof(signature));
             }
-            
+
             if (string.IsNullOrEmpty(publicKeyPem))
             {
                 throw new ArgumentException("公钥不能为空", nameof(publicKeyPem));
@@ -294,15 +185,8 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
 
             try
             {
-                using (RSA rsa = LoadPublicKeyFromPemString(publicKeyPem))
-                {
-                    byte[] dataBytes = Encoding.UTF8.GetBytes(originalData);
-                    byte[] signatureBytes = Convert.FromBase64String(signature);
-                    
-                    // 使用公钥验证签名
-                    // 使用SHA256哈希算法和PSS填充进行验签
-                    return rsa.VerifyData(dataBytes, signatureBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
-                }
+                // 调用 RSAEncryptionUtility 进行公钥验签
+                return Senparc.Utility.RSAEncryptionUtility.DecryptWithPublicKey(originalData, signature, publicKeyPem);
             }
             catch (Exception ex)
             {

@@ -13,6 +13,7 @@ using Senparc.Ncf.XncfBase;
 using Senparc.Xncf.AreasBase;
 using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices;
 using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Models;
+using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -54,12 +55,21 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
 #if !DEBUG
             builder.Services.AddHostedService<EdgeOTABackgroundService>();//设备检查OTA
 #endif
-
+            // 添加 WiFi 管理服务（单例）
+            builder.Services.AddSingleton<WifiManagerService>();
+            
             // 添加蓝牙后台服务
             builder.Services.AddHostedService<BluetoothBackgroundService>();
             
             // 添加WiFi后台服务
             builder.Services.AddHostedService<WifiBackgroundService>();
+
+            //添加自动同步NCB网络后台服务
+            builder.Services.AddHostedService<GetNCBNetInfoBackgroundService>();
+
+            // 添加热点配网后台服务
+            builder.Services.AddHostedService<HotspotProvisioningService>();
+
 
             // 添加MCP服务，使用HTTP传输，并注册工具类
             builder.Services
@@ -134,6 +144,9 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
             app.UseXncfModules(registerService);
             //.UseNcfDatabase<TDatabaseConfiguration>();
 
+            // 🔴 使用 Captive Portal 中间件 - 热点模式下自动跳转到配网页面
+            app.UseMiddleware<Senparc.Xncf.NeuCharBoxEdgeSimp.Middleware.CaptivePortalMiddleware>();
+
             /*  UseNcfDatabase<TDatabaseConfiguration>() 泛型类型说明
              *                
              *                  方法                            |         说明
@@ -153,6 +166,9 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
 
             // 映射MCP路由
             app.MapMcp("edgemcp");
+
+            // 🔴 映射 Razor Pages（用于 Admin Area 的配网页面等）
+            app.MapRazorPages();
 
             //输出启动成功标志
             Senparc.Ncf.Core.VersionManager.ShowSuccessTip("");

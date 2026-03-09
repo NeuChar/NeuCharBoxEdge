@@ -29,7 +29,7 @@ using Senparc.Xncf.NeuCharBoxEdgeSimp.Helper;
 
 namespace Senparc.Xncf.NeuCharBoxEdgeSimp
 {
-    public partial class Register : IXncfThread
+        public partial class Register : IXncfThread
     {
 
         private readonly IServiceProvider _serviceProvider;
@@ -585,11 +585,110 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
                                     instance = ActivatorUtilities.CreateInstance(scope.ServiceProvider, type);
 
 
-                                    // 获取方法
-                                    var method = type.GetMethod(methodName);
-                                    if (method == null)
+                                    // 获取方法 - 修复重载方法的处理
+                                    // 获取所有同名方法
+                                    var methods = type.GetMethods().Where(m => m.Name == methodName).ToList();
+
+                                    if (methods.Count == 0)
                                     {
                                         throw new Exception($"Method not found: {methodName}");
+                                    }
+
+                                    // 优先选择带有 FunctionRender 特性的方法
+                                    var functionRenderMethod = methods.FirstOrDefault(m => 
+                                        m.GetCustomAttributes<FunctionRenderAttribute>(false).Any()
+                                    );
+                                    
+                                    if (functionRenderMethod != null)
+                                    {
+                                        // 如果找到带 FunctionRender 特性的方法，直接使用它
+                                        methods = new List<MethodInfo> { functionRenderMethod };
+                                    }
+
+                                    // 解析 ParameterData 到字典中
+                                    Dictionary<string, string> parameterDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                                    if (data.ParameterData != null)
+                                    {
+                                        foreach (var p in data.ParameterData)
+                                        {
+                                            parameterDict[p.ParameterName] = p.ParameterValue;
+                                        }
+                                    }
+
+                                    // 选择最合适的方法重载
+                                    MethodInfo method = null;
+
+                                    // 尝试找到参数名匹配的方法
+                                    if (parameterDict.Count > 0)
+                                    {
+                                        // 首先尝试匹配具有复杂参数类型的方法（如 DisplayNumberRequest）
+                                        foreach (var m in methods)
+                                        {
+                                            var parameters = m.GetParameters();
+                                            if (parameters.Length == 1 &&
+                                                !parameters[0].ParameterType.IsPrimitive &&
+                                                parameters[0].ParameterType != typeof(string) &&
+                                                parameters[0].ParameterType != typeof(decimal))
+                                            {
+                                                // 找到了一个带有复杂参数类型的方法
+                                                method = m;
+                                                break;
+                                            }
+                                        }
+
+                                        // 如果没有找到带复杂参数的方法，尝试匹配参数名
+                                        if (method == null)
+                                        {
+                                            foreach (var m in methods)
+                                            {
+                                                var parameters = m.GetParameters();
+                                                // 检查第一个参数名是否与参数字典中的键匹配
+                                                if (parameters.Length > 0 &&
+                                                    parameterDict.Keys.Any(key => string.Equals(key, parameters[0].Name, StringComparison.OrdinalIgnoreCase)))
+                                                {
+                                                    method = m;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 如果仍未找到方法，使用参数数量匹配
+                                    if (method == null)
+                                    {
+                                        if (parameterDict.Count > 0)
+                                        {
+                                            // 尝试匹配参数数量
+                                            var methodsWithMatchingParamCount = methods.Where(m => m.GetParameters().Length == parameterDict.Count).ToList();
+                                            if (methodsWithMatchingParamCount.Count > 0)
+                                            {
+                                                method = methodsWithMatchingParamCount[0];
+                                            }
+                                            else
+                                            {
+                                                // 如果没有完全匹配数量的方法，选择参数最接近的方法
+                                                method = methods.OrderBy(m => Math.Abs(m.GetParameters().Length - parameterDict.Count)).First();
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // 没有参数，尝试找无参方法
+                                            var methodsWithNoParams = methods.Where(m => m.GetParameters().Length == 0).ToList();
+                                            if (methodsWithNoParams.Count > 0)
+                                            {
+                                                method = methodsWithNoParams[0];
+                                            }
+                                            else
+                                            {
+                                                // 如果没有无参方法，选择参数最少的方法
+                                                method = methods.OrderBy(m => m.GetParameters().Length).First();
+                                            }
+                                        }
+                                    }
+
+                                    if (method == null)
+                                    {
+                                        throw new Exception($"无法找到匹配的方法: {methodName}");
                                     }
 
                                     // 获取方法的参数信息
@@ -606,13 +705,10 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
                                         if (paramType.IsPrimitive || paramType == typeof(string) || paramType == typeof(decimal))
                                         {
                                             // 查找匹配的参数数据
-                                            var paramData = data.ParameterData.FirstOrDefault(p =>
-                                                string.Equals(p.ParameterName, methodParam.Name, StringComparison.OrdinalIgnoreCase));
-
-                                            if (paramData != null)
+                                            if (parameterDict.TryGetValue(methodParam.Name, out string paramValue))
                                             {
                                                 // 转换参数值到正确的类型
-                                                parameterValues[i] = Convert.ChangeType(paramData.ParameterValue, paramType);
+                                                parameterValues[i] = Convert.ChangeType(paramValue, paramType);
                                             }
                                             else
                                             {
@@ -632,20 +728,18 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp
                                             // 遍历属性并设置值
                                             foreach (var property in properties)
                                             {
-                                                var paramData = data.ParameterData.FirstOrDefault(p =>
-                                                    string.Equals(p.ParameterName, property.Name, StringComparison.OrdinalIgnoreCase));
-
-                                                if (paramData != null)
+                                                if (parameterDict.TryGetValue(property.Name, out string propValue))
                                                 {
                                                     try
                                                     {
                                                         // 转换并设置属性值
-                                                        var convertedValue = Convert.ChangeType(paramData.ParameterValue, property.PropertyType);
+                                                        var convertedValue = Convert.ChangeType(propValue, property.PropertyType);
                                                         property.SetValue(paramInstance, convertedValue);
                                                     }
                                                     catch (Exception ex)
                                                     {
-                                                        throw new Exception($"Error converting value for property {property.Name}: {ex.Message}");
+                                                        // 忽略转换失败的属性
+                                                        Console.WriteLine($"Error converting value for property {property.Name}: {ex.Message}");
                                                     }
                                                 }
                                             }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -317,7 +318,15 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
                 {
                     if (IsWifiEnabled)
                     {
-                        await ScanWifiNetworksAsync();
+                        // 检查热点是否激活，如果激活则停止扫描以确保热点稳定
+                        if (WifiManagerService.IsHotspotActive)
+                        {
+                            _logger.LogInformation("[WiFi后台] 热点模式已激活，暂停后台扫描以保持连接稳定");
+                        }
+                        else
+                        {
+                            await ScanWifiNetworksAsync();
+                        }
                     }
                     else
                     {

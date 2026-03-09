@@ -20,5 +20,9 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.Models
         public string Edge_HttpOrHttps { get; set; } = "http";
         public string Edge_Port { get; set; } = "5000";
         public string NCBIP { get; set; } = "";
+        /// <summary>
+        /// 是否开启AP
+        /// </summary>
+        public bool? IsOpenAP { get; set; } = false;
     }
 }

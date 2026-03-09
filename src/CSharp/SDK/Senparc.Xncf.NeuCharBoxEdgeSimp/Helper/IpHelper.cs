@@ -51,13 +51,17 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
         }
         public static string GetLocalIPv4()
         {
-            List<string> lstIp = new List<string>();
+            List<string> wifiIps = new List<string>();
+            List<string> otherIps = new List<string>();
 
             foreach (NetworkInterface netInterface in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (netInterface.OperationalStatus == OperationalStatus.Up &&
                     netInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
                 {
+                    // 判断是否为无线网络接口 | Check if it is a wireless network interface
+                    bool isWifi = netInterface.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
+
                     foreach (UnicastIPAddressInformation ip in netInterface.GetIPProperties().UnicastAddresses)
                     {
                         if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
@@ -68,33 +72,51 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Helper
                             if (ipAddress.StartsWith("192.168.") || ipAddress.StartsWith("10.") ||
                                 (ipAddress.StartsWith("172.") && IsPrivate172(ipAddress)))
                             {
-                                lstIp.Add(ipAddress);
+                                if (isWifi)
+                                {
+                                    wifiIps.Add(ipAddress);
+                                }
+                                else
+                                {
+                                    otherIps.Add(ipAddress);
+                                }
                             }
                         }
                     }
                 }
             }
 
-            if (lstIp.Count == 0)
+            // 优先从 WiFi IP 列表中按网段优先级返回
+            var result = FilterBestIp(wifiIps);
+            if (result != null) return result;
+
+            // 如果没有 WiFi IP，则从其他接口（如以太网）中按网段优先级返回
+            result = FilterBestIp(otherIps);
+            if (result != null) return result;
+
+            return "未找到局域网 IP";
+        }
+
+        /// <summary>
+        /// 按 192.168. > 172. > 10. > 其他 的顺序筛选最优 IP
+        /// </summary>
+        private static string FilterBestIp(List<string> ips)
+        {
+            if (ips == null || ips.Count == 0) return null;
+
+            if (ips.Any(t => t.StartsWith("192.168.")))
             {
-                return "未找到局域网 IP";
+                return ips.FirstOrDefault(t => t.StartsWith("192.168."));
             }
-            else
+            if (ips.Any(t => t.StartsWith("172.")))
             {
-                if (lstIp.Any(t => t.StartsWith("192.168.")))
-                {
-                    return lstIp.FirstOrDefault(t => t.StartsWith("192.168."));
-                }
-                if (lstIp.Any(t => t.StartsWith("172.")))
-                {
-                    return lstIp.FirstOrDefault(t => t.StartsWith("172."));
-                }
-                if (lstIp.Any(t => t.StartsWith("10.")))
-                {
-                    return lstIp.FirstOrDefault(t => t.StartsWith("10."));
-                }
-                return lstIp.FirstOrDefault();
+                return ips.FirstOrDefault(t => t.StartsWith("172."));
             }
+            if (ips.Any(t => t.StartsWith("10.")))
+            {
+                return ips.FirstOrDefault(t => t.StartsWith("10."));
+            }
+            return ips.FirstOrDefault();
         }
         static bool IsPrivate172(string ipAddress)
         {

@@ -18,6 +18,7 @@ namespace Senparc.Xncf.NeuCharBoxEdgeSimp.Domain.BackgroundServices
     /// <summary>
     /// 边缘设备请求主设备
     /// </summary>
+    [Obsolete]
     public class EdgeBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
     {
         private readonly SenderReceiverSet _senderReceiverSet;
