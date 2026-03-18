@@ -1,6 +1,7 @@
 #include "NcProvisioning.h"
 #include <HTTPClient.h>
 #include <time.h>
+#include "esp_bt.h"
 
 ProvisioningManager::ProvisioningManager() : server(5000), apServer(80) {
     _bootPin = 0;
@@ -427,16 +428,44 @@ void ProvisioningManager::loop() {
     server.handleClient();
 
     if (!_apActive) {
-        if (digitalRead(_bootPin) == LOW) {
+        bool pressed = (digitalRead(_bootPin) == LOW);
+
+        if (pressed) {
             if (_bootPressStart == 0) _bootPressStart = millis();
             else if (!_bootTriggered && (millis() - _bootPressStart >= BOOT_PRESS_MS)) {
                 _bootTriggered = true;
+                _clickCount = 0;
                 Serial.println("BOOT long-press: entering AP mode");
                 startApMode();
             }
         } else {
+            if (_bootPressStart > 0 && !_bootTriggered) {
+                _clickCount++;
+                if (_clickCount == 1) _firstClickAt = millis();
+            }
             _bootPressStart = 0;
             _bootTriggered = false;
+        }
+
+        if (_clickCount >= 2) {
+            _clickCount = 0;
+            if (!_btActive) {
+                Serial.println("[BOOT] Double-click: requesting Bluetooth provisioning...");
+                _btManualStartRequested = true;
+            } else {
+                Serial.println("[BOOT] Double-click: Bluetooth already active.");
+            }
+        } else if (_clickCount == 1 && millis() - _firstClickAt > DOUBLE_CLICK_WINDOW_MS) {
+            _clickCount = 0;
+        }
+    }
+
+    if (_btManualModeActive) {
+        static uint32_t lastBtManualLog = 0;
+        uint32_t now = millis();
+        if ((int32_t)(now - lastBtManualLog) >= 30000) {
+            lastBtManualLog = now;
+            Serial.printf("[BT] Manual mode active. Free Heap: %d. Waiting for provisioning or restart...\n", ESP.getFreeHeap());
         }
     }
 
@@ -657,6 +686,50 @@ bool ProvisioningManager::trySwitchToCloudSuggestedWifi() {
         Serial.printf("[CloudWifi] GetNCBNetInfo HTTP %d (heap=%d)\n", code, ESP.getFreeHeap());
     }
     return ok;
+}
+
+bool ProvisioningManager::isBtManualStartRequested() {
+    return _btManualStartRequested;
+}
+
+void ProvisioningManager::startBtManualMode() {
+    _btManualStartRequested = false;
+    Preferences btPrefs;
+    btPrefs.begin("nc_prov", false);
+    btPrefs.putBool("bt_mode", true);
+    btPrefs.end();
+    Serial.println("[BT] Restarting for Bluetooth provisioning...");
+    delay(200);
+    ESP.restart();
+}
+
+void ProvisioningManager::stopBluetooth() {
+    Preferences btPrefs;
+    btPrefs.begin("nc_prov", false);
+    bool manualBt = btPrefs.getBool("bt_mode", false);
+    if (manualBt) {
+        btPrefs.putBool("bt_mode", false);
+        btPrefs.end();
+        _btManualModeActive = true;
+        Serial.println("[BT] Manual BT mode: Bluetooth stays active until provisioning or restart.");
+        return;
+    }
+    btPrefs.end();
+
+    if (_btActive) {
+        SerialBT.end();
+        _btActive = false;
+        _btDelayedStart = false;
+        delay(100);
+        esp_bt_controller_deinit();
+        esp_bt_mem_release(ESP_BT_MODE_CLASSIC_BT);
+        Serial.printf("[BT] Bluetooth stopped, controller memory released. Free Heap: %d\n", ESP.getFreeHeap());
+    }
+    _btDelayedStart = false;
+}
+
+bool ProvisioningManager::isBtManualModeActive() {
+    return _btManualModeActive;
 }
 
 bool ProvisioningManager::isConnected() { return WiFi.status() == WL_CONNECTED; }

@@ -134,20 +134,10 @@ String rsaSign(String message, const char* pemKey) {
         return "";
     }
     
-    // 分配临时缓冲区
-    unsigned char *sig_buf = (unsigned char*)malloc(MBEDTLS_MPI_MAX_SIZE);
-    unsigned char *b64_buf = (unsigned char*)malloc(1024);
+    static unsigned char sig_buf[256];
+    static unsigned char b64_buf[512];
     unsigned char hash[32];
-    
-    if (!sig_buf || !b64_buf) {
-        Serial.println("[rsaSign] CRITICAL: Heap Malloc Failed!");
-        if (sig_buf) free(sig_buf);
-        if (b64_buf) free(b64_buf);
-        xSemaphoreGive(g_rsa_mutex);
-        return "";
-    }
 
-    // 计算哈希
     mbedtls_md_context_t md_ctx;
     mbedtls_md_init(&md_ctx);
     mbedtls_md_setup(&md_ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
@@ -156,7 +146,6 @@ String rsaSign(String message, const char* pemKey) {
     mbedtls_md_finish(&md_ctx, hash);
     mbedtls_md_free(&md_ctx);
 
-    // 执行签名
     size_t sig_len = 0;
     int ret = mbedtls_pk_sign(&g_pk, MBEDTLS_MD_SHA256, hash, 32, sig_buf, &sig_len, 
                              mbedtls_ctr_drbg_random, &g_ctr_drbg);
@@ -164,23 +153,15 @@ String rsaSign(String message, const char* pemKey) {
         char err_buf[128];
         mbedtls_strerror(ret, err_buf, sizeof(err_buf));
         Serial.printf("[rsaSign] FAIL: -0x%04X (%s)\n", -ret, err_buf);
-        free(sig_buf);
-        free(b64_buf);
         xSemaphoreGive(g_rsa_mutex);
         return "";
     }
     
-    // Base64编码
     size_t b64_len = 0;
-    mbedtls_base64_encode(b64_buf, 1024, &b64_len, sig_buf, sig_len);
+    mbedtls_base64_encode(b64_buf, sizeof(b64_buf), &b64_len, sig_buf, sig_len);
     b64_buf[b64_len] = '\0';
     
-    // 保存结果
     String finalResult = String((char*)b64_buf);
-    
-    // 清理资源
-    free(sig_buf);
-    free(b64_buf);
     
     // 释放互斥锁
     xSemaphoreGive(g_rsa_mutex);

@@ -23,8 +23,8 @@ NeuCharBoxEdge ESP32 SDK is a firmware development kit designed specifically for
 - Supports `isRealData` flag to mark high-frequency real-time data Actions
 
 ### 📡 Provisioning Management (NcProvisioning)
-- **Bluetooth Provisioning**: Receives encrypted WiFi credentials via Bluetooth Serial
-- **AP Portal Provisioning**: Long-press the BOOT button to enter AP mode with a built-in HTML configuration page
+- **Bluetooth Provisioning**: Bluetooth starts automatically 3 seconds after boot and is shut down once WiFi connects to free memory; **double-click the BOOT button** to restart the device with Bluetooth kept active for re-provisioning
+- **AP Portal Provisioning**: **Long-press the BOOT button for 2 seconds** to enter AP mode with a built-in HTML configuration page and DNS hijacking (Captive Portal)
 - **WiFi History**: Automatically saves up to 10 WiFi entries in NVS
 - **MCP HTTP Server**: Built-in `GET /edgemcp/sse` and `POST /edgemcp/messages` endpoints
 
@@ -73,6 +73,41 @@ ESP32/
 ### Install the SDK
 
 Copy the `libraries/NeuCharEdgeSDK/` folder into your Arduino `libraries` directory.
+
+### Compiling and Flashing with Arduino IDE
+
+#### Install ESP32 Board Support
+
+In the Arduino IDE **Boards Manager**, search for `esp32` and install the **esp32** package by **Espressif Systems**, version **2.0.17**.
+
+#### Board Configuration
+
+Open Arduino IDE and configure the following settings under the **Tools** menu:
+
+| Setting | Recommended Value |
+|---|---|
+| Board | `ESP32 Dev Module` |
+| CPU Frequency | `240MHz (WiFi/BT)` |
+| Core Debug Level | `None` |
+| Erase All Flash Before Sketch Upload | `Disabled` |
+| Events Run On | `Core 1` |
+| Flash Frequency | `80MHz` |
+| Flash Mode | `QIO` |
+| Flash Size | `4MB (32Mb)` |
+| JTAG Adapter | `Disabled` |
+| Arduino Runs On | `Core 1` |
+| Partition Scheme | `Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)` |
+| PSRAM | `Disabled` |
+| Upload Speed | `921600` |
+| Port | The serial port your device is connected to (e.g. `COM8`) |
+
+> **Partition Scheme**: `Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)` is recommended to reserve sufficient partition space for OTA upgrades.
+>
+> **Clearing NVS**: If you need to erase all NVS data (e.g. saved WiFi credentials and device identity) — such as when re-provisioning or replacing device credentials — set `Erase All Flash Before Sketch Upload` to `Enabled` before flashing, then set it back to `Disabled` afterwards.
+
+#### Serial Monitor
+
+Set the baud rate to **115200** to view device logs and debug output.
 
 ### Minimal Example
 
@@ -191,8 +226,16 @@ The SDK uses ESP32 NVS (Non-Volatile Storage) to persist the following data:
 ```cpp
 #define TUBE_CLK_PIN  18   // TM1637 clock pin
 #define TUBE_DIO_PIN  19   // TM1637 data pin
-#define BOOT_BTN       0   // BOOT button (long-press 2s to enter AP provisioning)
+#define BOOT_BTN       0   // BOOT button (double-click: restart into BT provisioning; long-press 2s: AP mode)
 ```
+
+### BOOT Button Reference
+
+| Action | Trigger | Behavior |
+|---|---|---|
+| None | Normal power-on | Bluetooth starts automatically after 3s; shuts down once WiFi connects to free memory |
+| Double-click | Two presses within 500ms | Restarts the device with Bluetooth kept active for re-provisioning (reset WiFi / NCB host) |
+| Long-press 2s | Hold ≥ 2s | Enters AP mode; hotspot name is `NCBEdge_{last 6 chars of DID}`; open `192.168.4.1` in browser to configure |
 
 ### Registered MCP Actions
 

@@ -55,23 +55,21 @@ protected:
     unsigned long _lastPingAt = 0;
     bool _pendingConnect = false;
 
-    void sendJson(DynamicJsonDocument& doc) {
-        String jsonString;
-        serializeJson(doc, jsonString);
-        int len = jsonString.length();
-        uint8_t * payload = (uint8_t *)malloc(len + 1);
+    void sendJson(JsonDocument& doc) {
+        size_t len = measureJson(doc);
+        uint8_t* payload = (uint8_t*)malloc(len + 1);
         if (!payload) return;
-        memcpy(payload, jsonString.c_str(), len);
+        serializeJson(doc, (char*)payload, len + 1);
         payload[len] = 0x1e;
         _webSocket.sendTXT(payload, len + 1);
         free(payload);
     }
     
-    void sendRaw(String txt) {
-        int len = txt.length();
-        uint8_t * payload = (uint8_t *)malloc(len + 1);
+    void sendRaw(const char* txt) {
+        size_t len = strlen(txt);
+        uint8_t* payload = (uint8_t*)malloc(len + 1);
         if (!payload) return;
-        memcpy(payload, txt.c_str(), len);
+        memcpy(payload, txt, len);
         payload[len] = 0x1e;
         _webSocket.sendTXT(payload, len + 1);
         free(payload);
@@ -183,7 +181,8 @@ public:
         if (_isConnected) {
             if (millis() - _lastPingAt > NC_WS_KEEPALIVE_INTERVAL_MS) {
                 _lastPingAt = millis();
-                sendRaw("{\"type\":6}");
+                static const uint8_t ping[] = {'{','"','t','y','p','e','"',':','6','}',0x1e};
+                _webSocket.sendTXT(ping, sizeof(ping));
             }
         }
     }
@@ -248,18 +247,16 @@ public:
 
 protected:
     void handleMessage(uint8_t * payload, size_t length) override {
-        // 创建一个安全的临时副本，确保有 null 终止符
-        char* safePayload = (char*)malloc(length + 1);
-        if (!safePayload) return;
-        memcpy(safePayload, payload, length);
-        safePayload[length] = '\0';
+        if (length == 0) return;
+        size_t effectiveLen = length;
+        if (payload[effectiveLen - 1] == 0x1e) effectiveLen--;
+        if (effectiveLen == 0) return;
 
-        String payloadStr = safePayload;
-        free(safePayload);
+        char saved = payload[effectiveLen];
+        payload[effectiveLen] = '\0';
+        String payloadStr((char*)payload);
+        payload[effectiveLen] = saved;
 
-        // 移除 SignalR 分隔符
-        if (payloadStr.endsWith("\x1e")) payloadStr.remove(payloadStr.length() - 1);
-        
         if (payloadStr.length() > 0 && payloadStr != "{}") {
             Serial.printf("[Cloud] RX: %s\n", payloadStr.c_str());
         }
@@ -288,7 +285,7 @@ protected:
                 String methodName = triggerData["interfaceName"] | triggerData["InterfaceName"] | "";
                 JsonArray paramList = triggerData["parameterData"].isNull() ? triggerData["ParameterData"] : triggerData["parameterData"];
 
-                DynamicJsonDocument paramDoc(512);
+                StaticJsonDocument<512> paramDoc;
                 JsonObject params = paramDoc.to<JsonObject>();
                 for (JsonObject p : paramList) {
                     String pName = p["parameterName"] | p["ParameterName"] | "";
@@ -335,7 +332,7 @@ protected:
                 sendJson(returnDoc);
 
                 if (invocationId.length() > 0) {
-                    DynamicJsonDocument compDoc(256);
+                    StaticJsonDocument<256> compDoc;
                     compDoc["type"] = 3;
                     compDoc["invocationId"] = invocationId;
                     compDoc["result"] = "OK";
@@ -435,17 +432,16 @@ protected:
     }
 
     void handleMessage(uint8_t * payload, size_t length) override {
-        // 创建一个安全的临时副本，确保有 null 终止符
-        char* safePayload = (char*)malloc(length + 1);
-        if (!safePayload) return;
-        memcpy(safePayload, payload, length);
-        safePayload[length] = '\0';
+        if (length == 0) return;
+        size_t effectiveLen = length;
+        if (payload[effectiveLen - 1] == 0x1e) effectiveLen--;
+        if (effectiveLen == 0) return;
 
-        String payloadStr = safePayload;
-        free(safePayload);
+        char saved = payload[effectiveLen];
+        payload[effectiveLen] = '\0';
+        String payloadStr((char*)payload);
+        payload[effectiveLen] = saved;
 
-        // 移除 SignalR 分隔符
-        if (payloadStr.endsWith("\x1e")) payloadStr.remove(payloadStr.length() - 1);
         if (payloadStr == "{}" || payloadStr.length() == 0) return;
 
         DynamicJsonDocument doc(2048);
@@ -503,7 +499,7 @@ protected:
                 JsonObject emptyParams = emptyDoc.to<JsonObject>();
                 String result = func.callback(emptyParams);
 
-                DynamicJsonDocument doc(1024);
+                StaticJsonDocument<1024> doc;
                 doc["type"] = 1;
                 doc["target"] = "PushEdgeRealData";
                 JsonArray args = doc.createNestedArray("arguments");
@@ -535,8 +531,8 @@ public:
     void requestToken() {
         if (!_isConnected) return;
         
-        _tokenInvocationId = String(millis()); // 简单作为 ID
-        DynamicJsonDocument doc(256);
+        _tokenInvocationId = String(millis());
+        StaticJsonDocument<256> doc;
         doc["type"] = 1;
         doc["invocationId"] = _tokenInvocationId;
         doc["target"] = "GetToken";

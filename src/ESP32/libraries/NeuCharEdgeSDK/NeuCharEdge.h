@@ -66,6 +66,7 @@ private:
     bool _localStartPending = false;
     bool _cloudFallbackTried = false;
     bool _cloudConnectedOnce = false;
+    bool _btManualMode = false;
     unsigned long _sdkStartAt = 0;
     String _localHost;
     String _localPath;
@@ -148,6 +149,12 @@ public:
 
         _provisioning.loop();
 
+        if (_provisioning.isBtManualStartRequested()) {
+            _provisioning.startBtManualMode();
+        }
+
+        if (_btManualMode) return;
+
         if (!_sdkStarted && _provisioning.isConnected()) {
             static bool wifiLogDone = false;
             if (!wifiLogDone) {
@@ -182,6 +189,15 @@ public:
                 Serial.println("==================================================");
                 Serial.println(">>> Starting NeuChar Edge SDK...");
                 
+                _provisioning.stopBluetooth();
+                delay(200);
+                Serial.printf("[NcEdge] Post-BT Free Heap: %d\n", ESP.getFreeHeap());
+
+                if (_provisioning.isBtManualModeActive()) {
+                    _btManualMode = true;
+                    return;
+                }
+
                 if (_enableCloud) {
                     Serial.printf("[Cloud] Connecting to %s (Port %d)...\n", NC_CLOUD_HOST, NC_CLOUD_PORT);
                     

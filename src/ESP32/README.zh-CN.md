@@ -23,8 +23,8 @@ NeuCharBoxEdge ESP32 SDK 是专为 ESP32 微控制器设计的固件开发套件
 - 支持 `isRealData` 标记高频实时数据 Action
 
 ### 📡 配网管理（NcProvisioning）
-- **蓝牙配网**：通过蓝牙串口接收加密的 WiFi 凭据
-- **AP 门户配网**：长按 BOOT 键进入 AP 模式，内置 HTML 配网页面
+- **蓝牙配网**：开机后 3 秒自动启动蓝牙，WiFi 连接成功后自动关闭以释放内存；**双击 BOOT 键**可重启设备并保持蓝牙活跃，用于重新配网
+- **AP 门户配网**：**长按 BOOT 键 2 秒**进入 AP 模式，内置 HTML 配网页面，支持 DNS 劫持（Captive Portal）
 - **WiFi 历史记录**：NVS 自动保存最多 10 条 WiFi 历史
 - **MCP HTTP 服务端**：内置 `GET /edgemcp/sse` + `POST /edgemcp/messages` 接口
 
@@ -73,6 +73,41 @@ ESP32/
 ### 安装 SDK
 
 将 `libraries/NeuCharEdgeSDK/` 文件夹复制到 Arduino 的 `libraries` 目录下。
+
+### Arduino IDE 编译与烧录
+
+#### 安装 ESP32 开发板支持
+
+在 Arduino IDE 的「开发板管理器」中搜索 `esp32`，安装 **Espressif Systems** 提供的 `esp32` 包，版本选择 **2.0.17**。
+
+#### 开发板配置
+
+打开 Arduino IDE，选择菜单 **工具**，按照下表进行配置：
+
+| 配置项 | 推荐值 |
+|---|---|
+| 开发板 | `ESP32 Dev Module` |
+| CPU Frequency | `240MHz (WiFi/BT)` |
+| Core Debug Level | `None` |
+| Erase All Flash Before Sketch Upload | `Disabled` |
+| Events Run On | `Core 1` |
+| Flash Frequency | `80MHz` |
+| Flash Mode | `QIO` |
+| Flash Size | `4MB (32Mb)` |
+| JTAG Adapter | `Disabled` |
+| Arduino Runs On | `Core 1` |
+| Partition Scheme | `Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)` |
+| PSRAM | `Disabled` |
+| Upload Speed | `921600` |
+| 端口 | 设备实际连接的串口（如 `COM8`） |
+
+> **Partition Scheme** 建议选择 `Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)`，为 OTA 升级预留足够的分区空间。
+>
+> **清除 NVS 分区**：若需要清除设备中已保存的 WiFi 凭据、设备身份等 NVS 数据（例如重新配网或更换设备身份），烧录时将 `Erase All Flash Before Sketch Upload` 改为 `Enabled`，烧录完成后恢复为 `Disabled` 即可。
+
+#### 串口监视器
+
+波特率设置为 **115200**，用于查看设备运行日志与调试输出。
 
 ### 极简接入示例
 
@@ -191,8 +226,16 @@ SDK 使用 ESP32 的 NVS（Non-Volatile Storage）持久化以下数据：
 ```cpp
 #define TUBE_CLK_PIN  18   // TM1637 时钟引脚
 #define TUBE_DIO_PIN  19   // TM1637 数据引脚
-#define BOOT_BTN       0   // BOOT 按键（长按 2s 进入 AP 配网）
+#define BOOT_BTN       0   // BOOT 按键（双击重启进入蓝牙配网；长按 2s 进入 AP 配网）
 ```
+
+### BOOT 按键操作说明
+
+| 操作 | 触发条件 | 行为 |
+|---|---|---|
+| 无操作 | 正常开机 | 3 秒后自动启动蓝牙；WiFi 连接成功后自动关闭蓝牙以释放内存 |
+| 双击 | 500ms 内连续按下两次 | 重启设备并保持蓝牙持续活跃，等待蓝牙配网（重新设置 WiFi / NCB 主机） |
+| 长按 2 秒 | 持续按住 ≥ 2s | 进入 AP 模式，设备热点名为 `NCBEdge_{DID后6位}`，浏览器访问 `192.168.4.1` 配网 |
 
 ### 注册的 MCP Actions
 

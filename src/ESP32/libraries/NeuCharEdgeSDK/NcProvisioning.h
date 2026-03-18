@@ -34,8 +34,13 @@ private:
 
     static const unsigned long BT_START_DELAY_MS = 3000;
     static const unsigned long BOOT_PRESS_MS = 2000;
+    static const unsigned long DOUBLE_CLICK_WINDOW_MS = 500;
     unsigned long _bootPressStart = 0;
     bool _bootTriggered = false;
+    int _clickCount = 0;
+    unsigned long _firstClickAt = 0;
+    bool _btManualStartRequested = false;
+    bool _btManualModeActive = false;
     String _apWifiOptions;
 
     std::vector<NcMcpTool*>* _toolsRef = nullptr;
@@ -64,6 +69,10 @@ public:
     void setTools(std::vector<NcMcpTool*>& tools);
     void begin();
     void loop();
+    void stopBluetooth();
+    bool isBtManualStartRequested();
+    void startBtManualMode();
+    bool isBtManualModeActive();
     bool isConnected();
     String getHost();
     // 云端建议网络：当 Local 未连接时拉取 SSID+NCBIP，若历史中有该 SSID 则切换并返回 true
