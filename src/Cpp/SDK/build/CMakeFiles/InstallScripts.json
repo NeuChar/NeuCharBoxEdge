@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/cmake_install.cmake",
+		"C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeLamp/cmake_install.cmake",
+		"C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeLed/cmake_install.cmake",
+		"C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeTube/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

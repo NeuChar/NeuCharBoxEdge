@@ -1,0 +1,5 @@
+C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/CMakeFiles/ZERO_CHECK.dir
+C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeLamp/CMakeFiles/EdgeLamp.dir
+C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeLed/CMakeFiles/EdgeLed.dir
+C:/Users/31713/Desktop/NeuCharBoxEdge/src/Cpp/SDK/build/Examples/EdgeTube/CMakeFiles/EdgeTube.dir
